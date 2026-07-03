@@ -1,0 +1,47 @@
+name: MASON Inbox Note
+description: Submit a raw note, prompt test, tool output, or memory candidate for MASON processing.
+title: "MASON Inbox: "
+labels:
+  - mason-inbox
+body:
+  - type: dropdown
+    id: source_type
+    attributes:
+      label: Source type
+      options:
+        - prompt test
+        - tool output
+        - workflow note
+        - style prompt source
+        - phonetic repair
+        - slider result
+        - conflict note
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: raw_note
+    attributes:
+      label: Raw note
+      description: Paste the raw material here.
+      placeholder: "What happened? What worked? What failed? What lesson should be remembered?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested_triggers
+    attributes:
+      label: Suggested trigger words
+      description: Optional retrieval hooks MASON should consider.
+      placeholder: "style prompt, phonetic repair, context packet, trigger card"
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected_memory
+    attributes:
+      label: Expected reusable lesson
+      description: Optional. What should MASON extract from this?
+    validations:
+      required: false
