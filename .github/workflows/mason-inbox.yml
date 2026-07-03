@@ -1,0 +1,73 @@
+name: MASON Inbox Processor
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write generated memory files"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  push:
+    paths:
+      - "inbox/**"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  process-inbox:
+    name: Process inbox into memory artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dry run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == 'false' }}
+        run: python scripts/mason_github_process.py
+
+      - name: Apply MASON processing
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.apply == 'true' }}
+        run: python scripts/mason_github_process.py --apply
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create review branch and pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="mason/process-${{ github.run_id }}"
+          git config user.name "mason-bot"
+          git config user.email "mason-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add episodes memory_cards trigger_cards raw_receipts reports inbox || true
+          git commit -m "MASON process inbox into memory artifacts"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "MASON: process inbox into memory artifacts" \
+            --body "Automated STONE + MASON run. Review generated episode summaries, memory cards, trigger cards, raw receipt moves, and reports before merging." \
+            --base main \
+            --head "$BRANCH"
+
+      - name: No changes
+        if: steps.changes.outputs.changed == 'false'
+        run: echo "No inbox notes to process."
