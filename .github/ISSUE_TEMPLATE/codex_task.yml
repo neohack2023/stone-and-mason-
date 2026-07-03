@@ -1,0 +1,50 @@
+name: Codex Task
+description: Hand a focused repo task to Codex.
+title: "Codex: "
+labels:
+  - codex
+  - enhancement
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Describe the exact change Codex should make.
+      placeholder: "Add provider=ollama support while preserving provider=rule."
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List the files or folders Codex may modify.
+      placeholder: "scripts/mason_github_process.py, docs/CODEX_MASON_MODE.md"
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      value: |
+        - Read AGENTS.md first.
+        - Keep provider=rule working as the fallback.
+        - Keep pull requests as the review gate.
+        - Validate model-proposed JSON before writing files.
+        - Every memory card must link back to a raw receipt.
+        - Do not promote canon without explicit instruction.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Dry run passes
+        - [ ] Generated markdown has frontmatter
+        - [ ] No unrelated files changed
+        - [ ] README/docs updated if behavior changed
+    validations:
+      required: true
