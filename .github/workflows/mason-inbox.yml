@@ -11,6 +11,23 @@ on:
         options:
           - "true"
           - "false"
+      provider:
+        description: "MASON provider backend"
+        required: true
+        default: "rule"
+        type: choice
+        options:
+          - "rule"
+          - "ollama"
+          - "codex"
+      ollama_model:
+        description: "Ollama model name for provider=ollama"
+        required: false
+        default: "qwen2.5-coder:3b"
+      ollama_endpoint:
+        description: "Ollama chat endpoint for provider=ollama"
+        required: false
+        default: "http://127.0.0.1:11434/api/chat"
   push:
     paths:
       - "inbox/**"
@@ -33,13 +50,38 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Dry run
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == 'false' }}
-        run: python scripts/mason_github_process.py
+      - name: Run MASON
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_APPLY: ${{ inputs.apply }}
+          INPUT_PROVIDER: ${{ inputs.provider }}
+          INPUT_OLLAMA_MODEL: ${{ inputs.ollama_model }}
+          INPUT_OLLAMA_ENDPOINT: ${{ inputs.ollama_endpoint }}
+          PREVIEW_PATH: ${{ runner.temp }}/mason_preview.json
+        run: |
+          PROVIDER="${INPUT_PROVIDER:-rule}"
+          APPLY="${INPUT_APPLY:-true}"
+          OLLAMA_MODEL="${INPUT_OLLAMA_MODEL:-qwen2.5-coder:3b}"
+          OLLAMA_ENDPOINT="${INPUT_OLLAMA_ENDPOINT:-http://127.0.0.1:11434/api/chat}"
 
-      - name: Apply MASON processing
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.apply == 'true' }}
-        run: python scripts/mason_github_process.py --apply
+          ARGS=(--provider "$PROVIDER" --preview-output "$PREVIEW_PATH")
+
+          if [[ "$PROVIDER" == "ollama" ]]; then
+            ARGS+=(--ollama-model "$OLLAMA_MODEL" --ollama-endpoint "$OLLAMA_ENDPOINT")
+          fi
+
+          if [[ "$APPLY" == "true" ]]; then
+            ARGS+=(--apply)
+          fi
+
+          python scripts/mason_github_process.py "${ARGS[@]}"
+
+      - name: Upload dry-run preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: mason-preview
+          path: ${{ runner.temp }}/mason_preview.json
+          if-no-files-found: ignore
 
       - name: Detect changes
         id: changes
@@ -59,15 +101,15 @@ jobs:
           git config user.name "mason-bot"
           git config user.email "mason-bot@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add episodes memory_cards trigger_cards raw_receipts reports inbox || true
+          git add episodes memory_cards trigger_cards raw_receipts reports inbox context_packets || true
           git commit -m "MASON process inbox into memory artifacts"
           git push origin "$BRANCH"
           gh pr create \
             --title "MASON: process inbox into memory artifacts" \
-            --body "Automated STONE + MASON run. Review generated episode summaries, memory cards, trigger cards, raw receipt moves, and reports before merging." \
+            --body "Automated STONE + MASON run. Review generated episode summaries, memory cards, trigger cards, raw receipt moves, reports, and preview artifact before merging." \
             --base main \
             --head "$BRANCH"
 
       - name: No changes
         if: steps.changes.outputs.changed == 'false'
-        run: echo "No inbox notes to process."
+        run: echo "No memory artifact changes to open as a PR. Check the mason-preview artifact for dry-run details."
