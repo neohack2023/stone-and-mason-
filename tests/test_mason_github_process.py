@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 
@@ -10,6 +11,7 @@ SPEC = importlib.util.spec_from_file_location("mason_github_process", MODULE_PAT
 assert SPEC is not None
 assert SPEC.loader is not None
 mason = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = mason
 SPEC.loader.exec_module(mason)
 
 
