@@ -497,6 +497,11 @@ def validate_action_plan(plan: dict[str, Any], source_path: Path) -> dict[str, A
     if not isinstance(actions, list):
         raise MasonValidationError("Plan must contain actions list.")
 
+    plan.setdefault("conflict_warnings", [])
+    expected_from = assert_safe_relative_path(rel(source_path))
+    if path_root(expected_from) not in ALLOWED_MOVE_FROM_ROOTS:
+        raise MasonValidationError(f"Move source root is not allowed: {expected_from}")
+
     for action in actions:
         if not isinstance(action, dict):
             raise MasonValidationError("Each action must be an object.")
@@ -515,13 +520,23 @@ def validate_action_plan(plan: dict[str, Any], source_path: Path) -> dict[str, A
             action["path"] = action_path
 
         if action_type == "move":
-            from_path = assert_safe_relative_path(action.get("from") or rel(source_path))
+            supplied_from = action.get("from") or expected_from
+            try:
+                supplied_from = assert_safe_relative_path(supplied_from)
+            except MasonValidationError as exc:
+                plan["conflict_warnings"].append(
+                    f"Move source overridden for {expected_from}: provider supplied unsafe from={action.get('from')!r} ({exc})."
+                )
+                supplied_from = expected_from
+
             to_path = assert_safe_relative_path(action.get("to", ""))
-            if path_root(from_path) not in ALLOWED_MOVE_FROM_ROOTS:
-                raise MasonValidationError(f"Move source root is not allowed: {from_path}")
+            if supplied_from != expected_from:
+                plan["conflict_warnings"].append(
+                    f"Move source overridden for {expected_from}: provider requested {supplied_from}."
+                )
             if path_root(to_path) not in ALLOWED_MOVE_TO_ROOTS:
                 raise MasonValidationError(f"Move destination root is not allowed: {to_path}")
-            action["from"] = from_path
+            action["from"] = expected_from
             action["to"] = to_path
 
         if action_type == "none" and not action.get("reason"):
@@ -530,7 +545,6 @@ def validate_action_plan(plan: dict[str, Any], source_path: Path) -> dict[str, A
     plan.setdefault("summary", "MASON action plan")
     plan.setdefault("classification", ["raw_receipt"])
     plan.setdefault("confidence", 0.0)
-    plan.setdefault("conflict_warnings", [])
     plan.setdefault("needs_human_review", True)
     plan.setdefault("report", {})
     return plan
