@@ -61,88 +61,183 @@ jobs:
           fi
 
       - name: Build review issue body
+        env:
+          MASON_VISIBLE_PROVIDER: ${{ inputs.mason_provider }}
+          MASON_VISIBLE_WRITE: ${{ inputs.write_generated_memory_files }}
         run: |
           set -euo pipefail
 
           mkdir -p reports
-          BODY="reports/mason_visible_review_issue.md"
+          python - <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
 
-          {
-            echo "# MASON Candidate Review"
-            echo
-            echo "**Run:** ${GITHUB_RUN_NUMBER}"
-            echo "**Workflow:** ${GITHUB_WORKFLOW}"
-            echo "**Branch:** ${GITHUB_REF_NAME}"
-            echo "**Provider:** ${{ inputs.mason_provider }}"
-            echo "**Write generated files:** ${{ inputs.write_generated_memory_files }}"
-            echo
-            echo "## Review Instructions"
-            echo
-            echo "Review the generated candidate files below. If useful, copy the accepted memory into the repo through a normal branch and pull request."
-            echo
-            echo "This issue is a review surface only. The workflow artifact contains the full generated files."
-            echo
-            echo "## Generated File List"
-            echo
-          } > "$BODY"
+          BODY = Path("reports/mason_visible_review_issue.md")
+          PREVIEW = Path("reports/mason_visible_preview.json")
+          ARTIFACT_ROOT = Path("reports/mason_visible_artifact")
+          EXCLUDED = {
+              "reports/mason_visible_preview.json",
+              "reports/mason_visible_review_issue.md",
+          }
+          EXCERPT_ROOTS = (
+              "anchor_cabinets/",
+              "memory_cards/",
+              "trigger_cards/",
+              "episodes/",
+              "context_packets/",
+              "reports/",
+          )
 
-          FOUND=false
+          if ARTIFACT_ROOT.exists():
+              shutil.rmtree(ARTIFACT_ROOT)
+          ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
 
-          for dir in episodes memory_cards trigger_cards context_packets raw_receipts reports anchor_cabinets; do
-            if [ -d "$dir" ]; then
-              while IFS= read -r file; do
-                FOUND=true
-                echo "- \`$file\`" >> "$BODY"
-              done < <(find "$dir" -maxdepth 1 -type f | sort)
-            fi
-          done
+          def safe_repo_path(value):
+              if not isinstance(value, str) or not value.strip():
+                  return None
+              normalized = value.replace("\\", "/").lstrip("/")
+              path = Path(normalized)
+              if path.is_absolute() or ".." in path.parts:
+                  return None
+              if normalized in EXCLUDED or normalized.startswith("reports/mason_visible_artifact/"):
+                  return None
+              return path
 
-          if [ "$FOUND" = "false" ]; then
-            echo "- No generated candidate files found." >> "$BODY"
-          fi
+          def unique_strings(values):
+              seen = set()
+              result = []
+              for value in values:
+                  if value not in seen:
+                      seen.add(value)
+                      result.append(value)
+              return result
 
-          {
-            echo
-            echo "## Preview JSON"
-            echo
-            echo '```json'
-            if [ -f reports/mason_visible_preview.json ]; then
-              sed -n '1,160p' reports/mason_visible_preview.json
-            else
-              echo '{"warning": "No preview file found."}'
-            fi
-            echo '```'
-            echo
-            echo "## Candidate Excerpts"
-            echo
-          } >> "$BODY"
+          def limited_text(text, max_lines, max_chars):
+              all_lines = text.splitlines()
+              excerpt = "\n".join(all_lines[:max_lines])
+              if len(excerpt) > max_chars:
+                  excerpt = excerpt[:max_chars].rstrip() + "\n[TRUNCATED: excerpt character limit reached]"
+              elif len(all_lines) > max_lines:
+                  excerpt += "\n[TRUNCATED: excerpt line limit reached]"
+              return excerpt
 
-          for dir in anchor_cabinets memory_cards trigger_cards episodes context_packets reports; do
-            if [ -d "$dir" ]; then
-              while IFS= read -r file; do
-                echo "" >> "$BODY"
-                echo "### \`$file\`" >> "$BODY"
-                echo "" >> "$BODY"
-                echo '```markdown' >> "$BODY"
-                sed -n '1,120p' "$file" >> "$BODY"
-                echo '```' >> "$BODY"
-              done < <(find "$dir" -maxdepth 1 -type f | sort)
-            fi
-          done
+          def first_lines(path, max_lines, max_chars):
+              text = path.read_text(encoding="utf-8", errors="replace")
+              return limited_text(text, max_lines=max_lines, max_chars=max_chars)
+
+          def fence_for(path):
+              if path.suffix == ".json":
+                  return "json"
+              if path.suffix in {".md", ".markdown"}:
+                  return "markdown"
+              return "text"
+
+          preview = {"ok": False, "warning": "No preview file found."}
+          if PREVIEW.exists():
+              preview = json.loads(PREVIEW.read_text(encoding="utf-8"))
+              artifact_preview = ARTIFACT_ROOT / "reports" / PREVIEW.name
+              artifact_preview.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(PREVIEW, artifact_preview)
+
+          changed_candidates = []
+          for result in preview.get("results", []):
+              for changed in result.get("changed", []):
+                  path = safe_repo_path(changed)
+                  if path is not None:
+                      changed_candidates.append(str(path).replace("\\", "/"))
+          changed_candidates = unique_strings(changed_candidates)
+
+          copied = []
+          missing = []
+          for candidate in changed_candidates:
+              source = Path(candidate)
+              if not source.is_file():
+                  missing.append(candidate)
+                  continue
+              destination = ARTIFACT_ROOT / candidate
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+              copied.append(candidate)
+
+          manifest = {
+              "run_number": os.environ.get("GITHUB_RUN_NUMBER", "unknown"),
+              "provider": os.environ.get("MASON_VISIBLE_PROVIDER", "unknown"),
+              "write_generated_memory_files": os.environ.get("MASON_VISIBLE_WRITE", "unknown"),
+              "changed_candidates": changed_candidates,
+              "artifact_files": copied,
+              "missing_candidates": missing,
+          }
+          manifest_path = ARTIFACT_ROOT / "reports" / "mason_visible_manifest.json"
+          manifest_path.parent.mkdir(parents=True, exist_ok=True)
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+          lines = [
+              "# MASON Candidate Review",
+              "",
+              f"**Run:** {os.environ.get('GITHUB_RUN_NUMBER', 'unknown')}",
+              f"**Workflow:** {os.environ.get('GITHUB_WORKFLOW', 'unknown')}",
+              f"**Branch:** {os.environ.get('GITHUB_REF_NAME', 'unknown')}",
+              f"**Provider:** {os.environ.get('MASON_VISIBLE_PROVIDER', 'unknown')}",
+              f"**Write generated files:** {os.environ.get('MASON_VISIBLE_WRITE', 'unknown')}",
+              "",
+              "## Review Instructions",
+              "",
+              "Review the generated candidate files below. If useful, copy accepted memory into the repo through a normal branch and pull request.",
+              "",
+              "This issue is a review surface only. The workflow artifact contains a run-scoped copy of the generated files plus preview metadata.",
+              "",
+              "## Generated File List",
+              "",
+          ]
+
+          if copied:
+              lines.extend(f"- `{path}`" for path in copied)
+          else:
+              lines.append("- No generated candidate files were created for this run.")
+
+          if missing:
+              lines.extend(["", "## Missing Generated Files", ""])
+              lines.extend(f"- `{path}`" for path in missing)
+
+          preview_text = json.dumps(preview, indent=2)
+          lines.extend([
+              "",
+              "## Preview JSON",
+              "",
+              "```json",
+              limited_text(preview_text, max_lines=160, max_chars=16000),
+              "```",
+              "",
+              "## Candidate Excerpts",
+              "",
+          ])
+
+          excerpt_paths = [path for path in copied if path.startswith(EXCERPT_ROOTS)]
+          if not excerpt_paths:
+              lines.append("No excerptable candidate files were created for this run.")
+          else:
+              for candidate in excerpt_paths:
+                  source = Path(candidate)
+                  lines.extend([
+                      "",
+                      f"### `{candidate}`",
+                      "",
+                      f"```{fence_for(source)}",
+                      first_lines(source, max_lines=120, max_chars=12000),
+                      "```",
+                  ])
+
+          BODY.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+          PY
 
       - name: Upload generated candidates
         uses: actions/upload-artifact@v6
         with:
           name: mason-generated-candidates-${{ github.run_number }}
-          path: |
-            episodes/
-            memory_cards/
-            trigger_cards/
-            context_packets/
-            raw_receipts/
-            reports/
-            anchor_cabinets/
-          if-no-files-found: ignore
+          path: reports/mason_visible_artifact/
+          if-no-files-found: error
 
       - name: Create review issue
         env:
