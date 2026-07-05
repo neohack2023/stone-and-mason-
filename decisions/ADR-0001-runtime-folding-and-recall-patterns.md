@@ -1,9 +1,10 @@
 # ADR-0001: Runtime Folding and Recall Patterns for MASON
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2026-07-04  
+**Accepted:** 2026-07-04 via PR #8  
 **Owner:** Human developer  
-**Related Issue/PR:** #7
+**Related Issue/PR:** #7, #8, #9
 
 ## Context
 
@@ -25,7 +26,7 @@ This ADR does not approve importing that package. It evaluates the pattern famil
 
 ## Decision
 
-Adopt the following architecture terms as **proposed MASON vNext doctrine**, pending human review:
+Adopt the following architecture terms as **MASON vNext doctrine**:
 
 | External pattern | MASON term | Purpose |
 |---|---|---|
@@ -36,7 +37,7 @@ Adopt the following architecture terms as **proposed MASON vNext doctrine**, pen
 | Task Rail | Action Rail | Track execution state outside the prompt so folding does not erase the plan. |
 | Register glyph grammar | Trust Register | Mark work as transient, executing, verdict, hazard, or blocked before harvesting durable memory. |
 
-The first implementation step should be documentation-only. No dependency, workflow, or production script change is approved by this ADR.
+The first implementation step remains documentation-only. No dependency, workflow, or production script change is approved by this ADR.
 
 Future implementation should be split into separate agent task packets, likely in this order:
 
@@ -66,11 +67,11 @@ Future implementation should be split into separate agent task packets, likely i
 
 ### Risk Controls
 
-- Keep this ADR in `Proposed` status until the human accepts it.
-- Do not modify `canon_locks/` as part of this proposal.
-- Do not modify `.github/workflows/` as part of this proposal.
-- Do not add package dependencies as part of this proposal.
+- Do not modify `canon_locks/` as part of this ADR.
+- Do not modify `.github/workflows/` as part of this ADR.
+- Do not add package dependencies as part of this ADR.
 - Require a new issue and PR before touching `scripts/`.
+- Keep future artifact contracts reviewable before automation writes those artifacts.
 
 ## Alternatives Considered
 
@@ -98,7 +99,7 @@ Revisit this ADR if:
 
 ## Current Approval Boundary
 
-Approved by this ADR if accepted:
+Approved by this ADR:
 
 - vocabulary and doctrine
 - documentation of proposed artifact shapes
