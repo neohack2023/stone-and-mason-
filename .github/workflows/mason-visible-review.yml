@@ -1,0 +1,155 @@
+name: MASON Visible Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      write_generated_memory_files:
+        description: "Write generated memory files"
+        required: true
+        type: boolean
+        default: true
+      mason_provider:
+        description: "MASON provider backend"
+        required: true
+        type: choice
+        options:
+          - rule
+          - ollama
+          - codex
+        default: rule
+      ollama_model:
+        description: "Ollama model name for provider=ollama"
+        required: false
+        default: "qwen2.5-coder:3b"
+      ollama_endpoint:
+        description: "Ollama chat endpoint for provider=ollama"
+        required: false
+        default: "http://127.0.0.1:11434/api/chat"
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  mason-visible-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Run MASON
+        env:
+          MASON_PROVIDER: ${{ inputs.mason_provider }}
+          OLLAMA_MODEL: ${{ inputs.ollama_model }}
+          OLLAMA_ENDPOINT: ${{ inputs.ollama_endpoint }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p reports
+
+          if [ "${{ inputs.write_generated_memory_files }}" = "true" ]; then
+            python scripts/mason_github_process.py --apply --preview-output reports/mason_visible_preview.json
+          else
+            python scripts/mason_github_process.py --preview-output reports/mason_visible_preview.json
+          fi
+
+      - name: Build review issue body
+        run: |
+          set -euo pipefail
+
+          mkdir -p reports
+          BODY="reports/mason_visible_review_issue.md"
+
+          {
+            echo "# MASON Candidate Review"
+            echo
+            echo "**Run:** ${GITHUB_RUN_NUMBER}"
+            echo "**Workflow:** ${GITHUB_WORKFLOW}"
+            echo "**Branch:** ${GITHUB_REF_NAME}"
+            echo "**Provider:** ${{ inputs.mason_provider }}"
+            echo "**Write generated files:** ${{ inputs.write_generated_memory_files }}"
+            echo
+            echo "## Review Instructions"
+            echo
+            echo "Review the generated candidate files below. If useful, copy the accepted memory into the repo through a normal branch and pull request."
+            echo
+            echo "This issue is a review surface only. The workflow artifact contains the full generated files."
+            echo
+            echo "## Generated File List"
+            echo
+          } > "$BODY"
+
+          FOUND=false
+
+          for dir in episodes memory_cards trigger_cards context_packets raw_receipts reports anchor_cabinets; do
+            if [ -d "$dir" ]; then
+              while IFS= read -r file; do
+                FOUND=true
+                echo "- \`$file\`" >> "$BODY"
+              done < <(find "$dir" -maxdepth 1 -type f | sort)
+            fi
+          done
+
+          if [ "$FOUND" = "false" ]; then
+            echo "- No generated candidate files found." >> "$BODY"
+          fi
+
+          {
+            echo
+            echo "## Preview JSON"
+            echo
+            echo '```json'
+            if [ -f reports/mason_visible_preview.json ]; then
+              sed -n '1,160p' reports/mason_visible_preview.json
+            else
+              echo '{"warning": "No preview file found."}'
+            fi
+            echo '```'
+            echo
+            echo "## Candidate Excerpts"
+            echo
+          } >> "$BODY"
+
+          for dir in anchor_cabinets memory_cards trigger_cards episodes context_packets reports; do
+            if [ -d "$dir" ]; then
+              while IFS= read -r file; do
+                echo "" >> "$BODY"
+                echo "### \`$file\`" >> "$BODY"
+                echo "" >> "$BODY"
+                echo '```markdown' >> "$BODY"
+                sed -n '1,120p' "$file" >> "$BODY"
+                echo '```' >> "$BODY"
+              done < <(find "$dir" -maxdepth 1 -type f | sort)
+            fi
+          done
+
+      - name: Upload generated candidates
+        uses: actions/upload-artifact@v6
+        with:
+          name: mason-generated-candidates-${{ github.run_number }}
+          path: |
+            episodes/
+            memory_cards/
+            trigger_cards/
+            context_packets/
+            raw_receipts/
+            reports/
+            anchor_cabinets/
+          if-no-files-found: ignore
+
+      - name: Create review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh issue create \
+            --title "MASON candidate review: run ${GITHUB_RUN_NUMBER}" \
+            --body-file reports/mason_visible_review_issue.md
